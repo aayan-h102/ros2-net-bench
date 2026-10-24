@@ -1,0 +1,36 @@
+# Two containers on their own bridge network:
+#   echo   = the rover (echoes every probe back)
+#   logger = the base station (sends probes, measures the link, writes results)
+# Set NETEM_PROFILE (none | near | mid | far | custom) to impair the link on both ends.
+
+services:
+  echo:
+    build: .
+    image: ros2-net-bench:latest
+    cap_add: [NET_ADMIN]          # needed for tc/netem
+    environment:
+      NETEM_PROFILE: ${NETEM_PROFILE:-none}
+      NETEM_ARGS: ${NETEM_ARGS:-}
+    networks: [benchnet]
+    restart: unless-stopped
+
+  logger:
+    build: .
+    image: ros2-net-bench:latest
+    depends_on: [echo]
+    cap_add: [NET_ADMIN]
+    entrypoint: ["/scripts/entrypoint.sh", "python3", "-m", "net_bench.logger_node"]
+    command: ["--duration", "30"]
+    environment:
+      NETEM_PROFILE: ${NETEM_PROFILE:-none}
+      NETEM_ARGS: ${NETEM_ARGS:-}
+      HOST_UID: ${HOST_UID:-0}
+      HOST_GID: ${HOST_GID:-0}
+    volumes:
+      - ./results:/results
+    networks: [benchnet]
+    profiles: [manual]            # only runs when called with `docker compose run logger`
+
+networks:
+  benchnet:
+    driver: bridge

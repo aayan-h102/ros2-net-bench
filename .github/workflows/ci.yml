@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - run: pip install pytest
+      - run: pytest -q
+
+  docker-smoke-test:
+    needs: unit-tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker compose build
+      - name: Start rover (echo) container
+        run: docker compose up -d echo
+      - name: "Clean link: fail if loss > 5%"
+        run: docker compose run --rm logger --rate 20 --payload 100 --duration 10 --label ci-clean --max-loss 5
+      - name: "Impaired link: netem must actually add delay"
+        run: |
+          docker compose down
+          NETEM_PROFILE=mid docker compose up -d echo
+          NETEM_PROFILE=mid docker compose run --rm logger --rate 20 --payload 100 --duration 10 --label ci-mid
+          p50=$(tail -n 1 results/summary.csv | cut -d, -f10)
+          echo "mid-profile RTT p50 = ${p50} ms"
+          python3 -c "import sys; sys.exit(0 if float('${p50}') > 20 else 1)"
+      - name: Report
+        if: always()
+        run: |
+          python3 net_bench/net_bench/analyze.py results/summary.csv || true
+          docker compose logs echo
+          docker compose down
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: benchmark-results
+          path: results/

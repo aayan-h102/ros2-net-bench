@@ -11,7 +11,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: "3.12"
       - run: pip install pytest
       - run: pytest -q
 
@@ -20,25 +20,38 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Load netem kernel module
+        run: sudo modprobe sch_netem || (sudo apt-get update && sudo apt-get install -y "linux-modules-extra-$(uname -r)" && sudo modprobe sch_netem)
       - name: Build image
         run: docker compose build
-      - name: Start rover (echo) container
-        run: docker compose up -d echo
-      - name: "Clean link: fail if loss > 5%"
-        run: docker compose run --rm logger --rate 20 --payload 100 --duration 10 --label ci-clean --max-loss 5
-      - name: "Impaired link: netem must actually add delay"
+
+      - name: "DDS, clean link: loss must be 5% or less"
+        run: |
+          docker compose up -d echo
+          docker compose run --rm logger --rate 20 --payload 100 --duration 10 --label ci-dds-clean --max-loss 5
+
+      - name: "DDS, impaired link: netem must actually add delay"
         run: |
           docker compose down
-          NETEM_PROFILE=mid docker compose up -d echo
-          NETEM_PROFILE=mid docker compose run --rm logger --rate 20 --payload 100 --duration 10 --label ci-mid
+          export NETEM_PROFILE=mid
+          docker compose up -d echo
+          docker compose run --rm logger --rate 20 --payload 100 --duration 10 --label ci-dds-mid
           p50=$(tail -n 1 results/summary.csv | cut -d, -f10)
           echo "mid-profile RTT p50 = ${p50} ms"
           python3 -c "import sys; sys.exit(0 if float('${p50}') > 20 else 1)"
+
+      - name: "Zenoh, clean link: loss must be 5% or less"
+        run: |
+          docker compose down
+          export RMW_IMPLEMENTATION=rmw_zenoh_cpp
+          docker compose up -d echo
+          docker compose run --rm logger --rate 20 --payload 100 --duration 10 --label ci-zenoh-clean --max-loss 5
+
       - name: Report
         if: always()
         run: |
           python3 net_bench/net_bench/analyze.py results/summary.csv || true
-          docker compose logs echo
+          docker compose logs || true
           docker compose down
       - uses: actions/upload-artifact@v4
         if: always()

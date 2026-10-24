@@ -8,10 +8,12 @@ import os
 import sys
 
 PROFILE_ORDER = ["none", "near", "mid", "far", "custom"]
+RMW_NAMES = {"rmw_fastrtps_cpp": "DDS (Fast DDS)", "rmw_zenoh_cpp": "Zenoh"}
 COLUMNS = [
-    ("profile", "Profile"), ("rate_hz", "Rate (Hz)"), ("payload_bytes", "Payload (B)"),
-    ("loss_pct", "Loss (%)"), ("rtt_p50_ms", "RTT p50 (ms)"), ("rtt_p95_ms", "RTT p95 (ms)"),
-    ("jitter_mean_ms", "Jitter (ms)"), ("goodput_kbps", "Goodput (kb/s)"),
+    ("rmw", "Middleware"), ("profile", "Profile"), ("rate_hz", "Rate (Hz)"),
+    ("payload_bytes", "Payload (B)"), ("loss_pct", "Loss (%)"), ("rtt_p50_ms", "RTT p50 (ms)"),
+    ("rtt_p95_ms", "RTT p95 (ms)"), ("jitter_mean_ms", "Jitter (ms)"),
+    ("goodput_kbps", "Goodput (kb/s)"),
 ]
 
 
@@ -20,10 +22,14 @@ def load(path):
         return list(csv.DictReader(f))
 
 
+def rmw_name(raw):
+    return RMW_NAMES.get(raw, raw)
+
+
 def sort_key(row):
     p = row["profile"]
     rank = PROFILE_ORDER.index(p) if p in PROFILE_ORDER else len(PROFILE_ORDER)
-    return (rank, float(row["rate_hz"]), int(float(row["payload_bytes"])))
+    return (row.get("rmw", ""), rank, float(row["rate_hz"]), int(float(row["payload_bytes"])))
 
 
 def markdown_table(rows):
@@ -34,15 +40,18 @@ def markdown_table(rows):
     for r in rows:
         cells = []
         for key, _ in COLUMNS:
-            v = r[key]
+            v = r.get(key, "")
             if key in ("rate_hz", "payload_bytes"):
                 v = str(int(float(v)))
+            elif key == "rmw":
+                v = rmw_name(v)
             cells.append(v)
         body.append("| " + " | ".join(cells) + " |")
     return "\n".join([head, sep, *body])
 
 
 def plot(rows, out_dir):
+    """One chart per metric: x = link profile, one line per middleware + rate + payload."""
     try:
         import matplotlib
         matplotlib.use("Agg")
@@ -53,27 +62,31 @@ def plot(rows, out_dir):
 
     rows = sorted(rows, key=sort_key)
     profiles = [p for p in PROFILE_ORDER if any(r["profile"] == p for r in rows)]
-    combos = sorted({(float(r["rate_hz"]), int(float(r["payload_bytes"]))) for r in rows})
+    series = sorted({(r.get("rmw", ""), float(r["rate_hz"]), int(float(r["payload_bytes"])))
+                     for r in rows})
     made = []
     for metric, ylabel, fname in [
         ("rtt_p95_ms", "RTT p95 (ms)", "latency_p95.png"),
         ("loss_pct", "Packet loss (%)", "loss.png"),
     ]:
         fig, ax = plt.subplots(figsize=(7, 4))
-        width = 0.8 / max(len(combos), 1)
-        for i, (rate, payload) in enumerate(combos):
-            ys = []
-            for p in profiles:
-                match = [r for r in rows if r["profile"] == p and float(r["rate_hz"]) == rate
-                         and int(float(r["payload_bytes"])) == payload]
-                ys.append(float(match[-1][metric]) if match else 0.0)
-            xs = [j + i * width for j in range(len(profiles))]
-            ax.bar(xs, ys, width, label=f"{int(rate)} Hz, {payload} B")
-        ax.set_xticks([j + width * (len(combos) - 1) / 2 for j in range(len(profiles))])
+        for rmw, rate, payload in series:
+            xs, ys = [], []
+            for i, p in enumerate(profiles):
+                match = [r for r in rows if r.get("rmw", "") == rmw and r["profile"] == p
+                         and float(r["rate_hz"]) == rate and int(float(r["payload_bytes"])) == payload]
+                if match:
+                    xs.append(i)
+                    ys.append(float(match[-1][metric]))
+            style = "-" if "zenoh" not in rmw else "--"
+            ax.plot(xs, ys, style, marker="o",
+                    label=f"{rmw_name(rmw)}, {int(rate)} Hz, {payload} B")
+        ax.set_xticks(range(len(profiles)))
         ax.set_xticklabels(profiles)
-        ax.set_xlabel("Simulated link profile")
+        ax.set_xlabel("Simulated link profile (near to far)")
         ax.set_ylabel(ylabel)
-        ax.legend(fontsize=8)
+        ax.grid(alpha=0.3)
+        ax.legend(fontsize=7)
         fig.tight_layout()
         path = os.path.join(out_dir, fname)
         fig.savefig(path, dpi=150)

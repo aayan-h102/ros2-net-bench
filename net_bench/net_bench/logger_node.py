@@ -129,7 +129,8 @@ def main(argv=None):
 
     profile = os.environ.get("NETEM_PROFILE", "none")
     rmw = os.environ.get("RMW_IMPLEMENTATION", "rmw_fastrtps_cpp")
-    label = args.label or f"{profile}-{int(args.rate)}hz-{args.payload}b"
+    rmw_short = rmw.removeprefix("rmw_").removesuffix("_cpp")
+    label = args.label or f"{rmw_short}-{profile}-{int(args.rate)}hz-{args.payload}b"
 
     rclpy.init()
     node = Logger(args.rate, args.payload)

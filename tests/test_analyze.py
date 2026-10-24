@@ -24,10 +24,23 @@ def test_table_orders_profiles_near_to_far(tmp_path):
 
     table = analyze.markdown_table(analyze.load(path))
     lines = table.splitlines()
-    assert lines[0].startswith("| Profile")
-    profiles = [line.split("|")[1].strip() for line in lines[2:]]
+    assert lines[0].startswith("| Middleware | Profile")
+    profiles = [line.split("|")[2].strip() for line in lines[2:]]
     assert profiles == ["none", "mid", "far"]
-    assert "| 10 | 100 |" in lines[2]
+    assert "| DDS (Fast DDS) | none | 10 | 100 |" in lines[2]
+
+
+def test_table_groups_by_middleware(tmp_path):
+    path = tmp_path / "summary.csv"
+    zen = row("none", 10.0, 100, 0.0)
+    zen["rmw"] = "rmw_zenoh_cpp"
+    with open(path, "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=FIELDS)
+        w.writeheader()
+        w.writerow(zen)
+        w.writerow(row("far", 10.0, 100, 8.0))
+    lines = analyze.markdown_table(analyze.load(path)).splitlines()
+    assert [line.split("|")[1].strip() for line in lines[2:]] == ["DDS (Fast DDS)", "Zenoh"]
 
 
 def test_main_writes_report(tmp_path):

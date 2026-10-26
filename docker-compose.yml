@@ -10,7 +10,7 @@ x-bench-env: &bench-env
   NETEM_PROFILE: ${NETEM_PROFILE:-none}
   NETEM_ARGS: ${NETEM_ARGS:-}
   RMW_IMPLEMENTATION: ${RMW_IMPLEMENTATION:-rmw_fastrtps_cpp}
-  ZENOH_CONFIG_OVERRIDE: 'connect/endpoints=["tcp/zenoh-router:7447"]'
+  ZENOH_CONFIG_OVERRIDE: 'listen/endpoints=["tcp/0.0.0.0:0"];connect/endpoints=["tcp/zenoh-router:7447"]'
 
 services:
   zenoh-router:
